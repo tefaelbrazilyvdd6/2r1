@@ -51,13 +51,24 @@ jobs:
           $t = Test-NetConnection -ComputerName $env:TS_IP -Port 3389
           if (-not $t.TcpTestSucceeded) { Write-Error "Port 3389 unreachable"; exit 1 }
 
-      - name: Print Access Info + Keep Alive
+      - name: Write IP artifact
         run: |
+          New-Item -ItemType Directory -Force -Path rdp_out | Out-Null
+          "IP=$env:TS_IP" | Out-File -FilePath rdp_out\rdp_info.txt -Encoding utf8
           Write-Host "=== RDP READY ==="
           Write-Host "IP  : $env:TS_IP"
           Write-Host "User: RDP"
           Write-Host "Pass: T3legram@yoCND"
           Write-Host "================="
+
+      - name: Upload RDP info
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-info
+          path: rdp_out/rdp_info.txt
+
+      - name: Download startup bat + keep alive
+        run: |
           $rdpProfile  = "C:\Users\RDP"
           $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
           $batUrl      = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
