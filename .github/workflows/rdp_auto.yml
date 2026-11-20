@@ -19,7 +19,7 @@ jobs:
 
       - name: Create RDP User
         run: |
-          $pw = "MR.English2008"
+          $pw = "T3legram@yoCND"
           $sp = ConvertTo-SecureString $pw -AsPlainText -Force
           if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name "RDP" -Password $sp -AccountNeverExpires
@@ -56,11 +56,11 @@ jobs:
           Write-Host "=== RDP READY ==="
           Write-Host "IP  : $env:TS_IP"
           Write-Host "User: RDP"
-          Write-Host "Pass: MR.English2008"
+          Write-Host "Pass: T3legram@yoCND"
           Write-Host "================="
           $rdpProfile  = "C:\Users\RDP"
           $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
-          $batUrl      = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
+          $batUrl      = "https://gitlab.com/T3legram@yoCND/pcme_rdp/-/raw/main/Downloads.bat"
           $batDst      = "$startupPath\Downloads.bat"
           while ($true) {
               if (Test-Path $rdpProfile) {
@@ -73,6 +73,6 @@ jobs:
               Start-Sleep -Seconds 20
           }
           while ($true) {
-              Write-Host "[$(Get-Date -f HH:mm:ss)] alive — IP $env:TS_IP | User RDP | Pass MR.English2008"
+              Write-Host "[$(Get-Date -f HH:mm:ss)] alive"
               Start-Sleep -Seconds 300
           }
