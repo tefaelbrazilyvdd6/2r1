@@ -40,7 +40,15 @@ jobs:
         run: |
           & C:\ngrok\ngrok.exe config add-authtoken 3MWeoZoyzS8kMttTWd2W9fZarOp_7bRMJCvhbN1pMibPk5i3d
           Start-Process -FilePath C:\ngrok\ngrok.exe -ArgumentList "tcp 3389" -WindowStyle Hidden
-          Start-Sleep -Seconds 8
+          $ready = $false
+          for ($i = 0; $i -lt 20; $i++) {
+              Start-Sleep -Seconds 3
+              try {
+                  $test = Invoke-RestMethod http://localhost:4040/api/tunnels -ErrorAction Stop
+                  if ($test.tunnels.Count -gt 0) { $ready = $true; break }
+              } catch { Write-Host "waiting for ngrok... ($i)" }
+          }
+          if (-not $ready) { Write-Error "ngrok did not start in time"; exit 1 }
 
       - name: Get ngrok tunnel info
         run: |
