@@ -1,4 +1,4 @@
-name: rdp-auto-ngrok
+name: rdp-auto-tunnel
 
 on:
   workflow_dispatch:
@@ -31,36 +31,64 @@ jobs:
           Add-LocalGroupMember -Group "Administrators"       -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-      - name: Install ngrok
+      - name: Install OpenSSH
         run: |
-          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile "$env:TEMP\ngrok.zip"
-          Expand-Archive "$env:TEMP\ngrok.zip" -DestinationPath "C:\ngrok" -Force
+          Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+          Get-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
-      - name: Start ngrok tunnel
+      - name: Start SSH tunnel via localhost.run
+        shell: powershell
         run: |
-          & C:\ngrok\ngrok.exe config add-authtoken 3MWeoZoyzS8kMttTWd2W9fZarOp_7bRMJCvhbN1pMibPk5i3d
-          Start-Process -FilePath C:\ngrok\ngrok.exe -ArgumentList "tcp 3389" -WindowStyle Hidden
-          $ready = $false
-          for ($i = 0; $i -lt 20; $i++) {
-              Start-Sleep -Seconds 3
-              try {
-                  $test = Invoke-RestMethod http://localhost:4040/api/tunnels -ErrorAction Stop
-                  if ($test.tunnels.Count -gt 0) { $ready = $true; break }
-              } catch { Write-Host "waiting for ngrok... ($i)" }
+          $logFile = "C:\tunnel.log"
+          $sshArgs = @(
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ServerAliveInterval=60",
+            "-R", "3389:localhost:3389",
+            "nokey@localhost.run"
+          )
+          $proc = Start-Process -FilePath "ssh" -ArgumentList $sshArgs `
+                    -RedirectStandardOutput $logFile `
+                    -RedirectStandardError "C:\tunnel_err.log" `
+                    -WindowStyle Hidden -PassThru
+          Write-Host "SSH PID: $($proc.Id)"
+
+          # wait for tunnel URL to appear in log
+          $url = $null
+          for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 4
+              if (Test-Path $logFile) {
+                  $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+                  if ($content) {
+                      Write-Host "--- log so far ---"
+                      Write-Host $content
+                      # localhost.run prints lines like: tunneled with tls termination, https://xxx.lhr.life
+                      # and also TCP lines: 1.tcp.eu.ngrok.io:PORT
+                      $m = [regex]::Match($content, 'tunneled.*?(\S+\.lhr\.life)')
+                      if ($m.Success) { $url = $m.Groups[1].Value; break }
+                      # fallback: any hostname:port pattern
+                      $m2 = [regex]::Match($content, '(\S+\.localhost\.run:\d+)')
+                      if ($m2.Success) { $url = $m2.Groups[1].Value; break }
+                  }
+              }
+              Write-Host "waiting for tunnel... ($i)"
           }
-          if (-not $ready) { Write-Error "ngrok did not start in time"; exit 1 }
 
-      - name: Get ngrok tunnel info
-        run: |
-          $r = Invoke-RestMethod http://localhost:4040/api/tunnels
-          $url = $r.tunnels[0].public_url -replace "tcp://", ""
-          $rdpHost = $url.Split(":")[0]
-          $rdpPort = $url.Split(":")[1]
+          if (-not $url) {
+              Write-Host "=== TUNNEL ERROR LOG ==="
+              Get-Content "C:\tunnel_err.log" -ErrorAction SilentlyContinue
+              Write-Error "Tunnel URL not found in time"; exit 1
+          }
+
+          $parts = $url -replace "https://","" -split ":"
+          $rdpHost = $parts[0]
+          $rdpPort = if ($parts.Count -gt 1) { $parts[1] } else { "443" }
+
           Write-Host "=== RDP READY ==="
           Write-Host "HOST : $rdpHost"
           Write-Host "PORT : $rdpPort"
           Write-Host "USER : RDP"
           Write-Host "PASS : T3legram@yoCND"
+
           New-Item -ItemType Directory -Force -Path rdp_out | Out-Null
           "HOST=$rdpHost`nPORT=$rdpPort" | Out-File -FilePath rdp_out\rdp_info.txt -Encoding utf8
 
