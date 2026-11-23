@@ -1,4 +1,4 @@
-name: rdp-auto
+name: rdp-auto-ngrok
 
 on:
   workflow_dispatch:
@@ -31,38 +31,30 @@ jobs:
           Add-LocalGroupMember -Group "Administrators"       -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-      - name: Install Tailscale
+      - name: Install ngrok
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $out = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $url -OutFile $out
-          Start-Process msiexec.exe -ArgumentList "/i","$out","/quiet","/norestart" -Wait
-          Remove-Item $out -Force
+          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile "$env:TEMP\ngrok.zip"
+          Expand-Archive "$env:TEMP\ngrok.zip" -DestinationPath "C:\ngrok" -Force
 
-      - name: Connect Tailscale
+      - name: Start ngrok tunnel
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=tskey-auth-knYGm7a5Ua11CNTRL-1BrN9gmobgK4mAWmbS2AgK43DYL6MJcUC --hostname=gh-rdp-$env:GITHUB_RUN_ID --accept-routes
-          $ip = $null; $r = 0
-          while (-not $ip -and $r -lt 15) {
-              $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 4; $r++
-          }
-          if (-not $ip) { Write-Error "No Tailscale IP"; exit 1 }
-          echo "TS_IP=$ip" >> $env:GITHUB_ENV
+          & C:\ngrok\ngrok.exe config add-authtoken 3MWeoZoyzS8kMttTWd2W9fZarOp_7bRMJCvhbN1pMibPk5i3d
+          Start-Process -FilePath C:\ngrok\ngrok.exe -ArgumentList "tcp 3389" -WindowStyle Hidden
+          Start-Sleep -Seconds 8
 
-      - name: Verify RDP Port
+      - name: Get ngrok tunnel info
         run: |
-          $t = Test-NetConnection -ComputerName $env:TS_IP -Port 3389
-          if (-not $t.TcpTestSucceeded) { Write-Error "Port 3389 unreachable"; exit 1 }
-
-      - name: Write IP artifact
-        run: |
-          New-Item -ItemType Directory -Force -Path rdp_out | Out-Null
-          "IP=$env:TS_IP" | Out-File -FilePath rdp_out\rdp_info.txt -Encoding utf8 -NoNewline
+          $r = Invoke-RestMethod http://localhost:4040/api/tunnels
+          $url = $r.tunnels[0].public_url -replace "tcp://", ""
+          $rdpHost = $url.Split(":")[0]
+          $rdpPort = $url.Split(":")[1]
           Write-Host "=== RDP READY ==="
-          Write-Host "IP  : $env:TS_IP"
-          Write-Host "User: RDP"
-          Write-Host "Pass: T3legram@yoCND"
+          Write-Host "HOST : $rdpHost"
+          Write-Host "PORT : $rdpPort"
+          Write-Host "USER : RDP"
+          Write-Host "PASS : T3legram@yoCND"
+          New-Item -ItemType Directory -Force -Path rdp_out | Out-Null
+          "HOST=$rdpHost`nPORT=$rdpPort" | Out-File -FilePath rdp_out\rdp_info.txt -Encoding utf8
 
       - name: Upload RDP info
         uses: actions/upload-artifact@v4
